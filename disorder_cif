@@ -1,0 +1,57 @@
+import os
+
+def extract_occupancy_from_cif(file_path):
+    """
+    Parse the .cif file and extract values from the _atom_site_occupancy column.
+
+    Parameters:
+    file_path (str): Path to the .cif file.
+
+    Returns:
+    list: List of _atom_site_occupancy values.
+    """
+    occupancy_values = []
+    inside_atom_site_loop = False
+    occupancy_index = None
+    loop_headers = []
+
+    with open(file_path, "r", encoding="utf-8") as file:
+        lines = file.readlines()
+
+    for line in lines:
+        line = line.strip()
+
+        # Detect the start of a loop_ block
+        if line.startswith("loop_"):
+            inside_atom_site_loop = True
+            loop_headers = []
+            occupancy_index = None
+            continue
+
+        # If inside a loop_, parse column headers
+        if inside_atom_site_loop and line.startswith("_atom_site_"):
+            loop_headers.append(line)
+
+            # Find the index of _atom_site_occupancy
+            if line == "_atom_site_occupancy":
+                occupancy_index = len(loop_headers) - 1
+
+        # If encountering content that does not start with _atom_site_, and column headers have been read, parse data
+        elif inside_atom_site_loop and occupancy_index is not None:
+            parts = line.split()
+            if len(parts) > occupancy_index:
+                occupancy_values.append(parts[occupancy_index])
+
+        # If encountering a new label that does not start with _atom_site_, it indicates the end of the loop_
+        elif inside_atom_site_loop and not line.startswith("_"):
+            inside_atom_site_loop = False
+
+    return occupancy_values
+
+# Example usage
+file_path = r"E:\H3\downloads\atomic_structure\1111\files\1552602_III_GACs2Pb2Br7.cif"  # Please replace with your actual path
+occupancy_values = extract_occupancy_from_cif(file_path)
+
+# Output results
+print("Extracted _atom_site_occupancy values:")
+print(occupancy_values)
