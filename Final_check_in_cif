@@ -1,0 +1,139 @@
+import os
+import re
+from collections import Counter
+
+# === Parse formula into stoichiometry (supports nested parentheses) ===
+def parse_formula_to_stoichiometry(formula):
+    def multiply_counts(counts, factor):
+        return {k: v * factor for k, v in counts.items()}
+
+    def parse(subformula):
+        stack = []
+        current = Counter()
+        i = 0
+        while i < len(subformula):
+            if subformula[i] == '(':
+                stack.append(current)
+                current = Counter()
+                i += 1
+            elif subformula[i] == ')':
+                i += 1
+                num = ''
+                while i < len(subformula) and subformula[i].isdigit():
+                    num += subformula[i]
+                    i += 1
+                multiplier = int(num) if num else 1
+                top = stack.pop()
+                for elem, cnt in current.items():
+                    top[elem] += cnt * multiplier
+                current = top
+            else:
+                match = re.match(r'([A-Z][a-z]?)(\d*)', subformula[i:])
+                if match:
+                    elem, num = match.groups()
+                    i += len(match.group(0))
+                    count = int(num) if num else 1
+                    current[elem] += count
+                else:
+                    i += 1
+        return dict(current)
+
+    return parse(formula)
+
+# === Parse .in file to get stoichiometry ===
+def parse_geometry_in(file_path):
+    element_counts = Counter()
+    with open(file_path, "r", encoding="utf-8") as file:
+        for line in file:
+            if line.strip() == "" or line.startswith("#"):
+                continue
+            parts = line.split()
+            if len(parts) < 5:
+                continue
+            if parts[0].lower() == "atom":
+                element = parts[-1]
+                if re.match(r"^[A-Z][a-z]?$", element):
+                    element_counts[element] += 1
+    return dict(element_counts)
+
+# === Parse .cif file to extract occupancy values ===
+def extract_occupancy_from_cif(file_path):
+    occupancy_values = []
+    inside_atom_site_loop = False
+    occupancy_index = None
+    loop_headers = []
+
+    with open(file_path, "r", encoding="utf-8") as file:
+        lines = file.readlines()
+
+    for line in lines:
+        line = line.strip()
+        if line.startswith("loop_"):
+            inside_atom_site_loop = True
+            loop_headers = []
+            occupancy_index = None
+            continue
+        if inside_atom_site_loop and line.startswith("_atom_site_"):
+            loop_headers.append(line)
+            if line == "_atom_site_occupancy":
+                occupancy_index = len(loop_headers) - 1
+        elif inside_atom_site_loop and occupancy_index is not None:
+            parts = line.split()
+            if len(parts) > occupancy_index:
+                try:
+                    val = float(parts[occupancy_index])
+                    occupancy_values.append(val)
+                except ValueError:
+                    continue
+        elif inside_atom_site_loop and not line.startswith("_"):
+            inside_atom_site_loop = False
+
+    return occupancy_values
+
+# === Compare two stoichiometries to check if they are proportional ===
+def compare_ratios(dict1, dict2, tol=1e-2):
+    if set(dict1.keys()) != set(dict2.keys()):
+        return False
+    ratios = []
+    for key in dict1:
+        if dict1[key] == 0 or dict2[key] == 0:
+            return False
+        ratios.append(dict2[key] / dict1[key])
+    ref_ratio = ratios[0]
+    for r in ratios[1:]:
+        if abs(r - ref_ratio) > tol:
+            return False
+    return True
+
+# === Main script ===
+def main():
+    file_path = input("Enter the full path to the structure file (.in or .cif): ").strip()
+    ext = os.path.splitext(file_path)[-1].lower()
+
+    if ext == ".in":
+        formula = input("Enter the corresponding formula (e.g., Co2FeO4): ").strip()
+        formula_stoichiometry = parse_formula_to_stoichiometry(formula)
+        geometry_stoichiometry = parse_geometry_in(file_path)
+
+        print(f"\nFormula stoichiometry: {formula_stoichiometry}")
+        print(f"geometry.in stoichiometry: {geometry_stoichiometry}")
+
+        if compare_ratios(formula_stoichiometry, geometry_stoichiometry):
+            print("The structure is ordered. Stoichiometries are consistent.")
+        else:
+            print("Disorder detected. Stoichiometries do not match.")
+
+    elif ext == ".cif":
+        occupancies = extract_occupancy_from_cif(file_path)
+        has_disorder = any(o < 1.0 for o in occupancies)
+        print(f"\nOccupancy values: {occupancies}")
+        if has_disorder:
+            print("Disorder detected. At least one occupancy value is less than 1.")
+        else:
+            print("The structure is ordered. All occupancy values are 1.")
+
+    else:
+        print("Unsupported file format. Please provide a .in or .cif file.")
+
+if __name__ == "__main__":
+    main()
